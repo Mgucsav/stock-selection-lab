@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.pytest-tmp/
+.env
+.vscode/
+data/raw/*
+data/processed/*
+data/rejected/*
+!data/**/.gitkeep
