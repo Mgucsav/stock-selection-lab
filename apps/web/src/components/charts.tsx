@@ -96,13 +96,27 @@ export function AllocationBars({ items, max }: { items: Array<{ label: string; v
 }
 
 /** Tek hissenin fiyat grafiği (günlük veya gün içi barlar). Renk: seri-1; referans çizgi: önceki kapanış. */
-export function PriceChart({ bars, intraday, referencePrice, height = 320 }: {
+function movingAverage(values: number[], window: number): Array<number | null> {
+  let sum = 0;
+  return values.map((value, index) => {
+    sum += value;
+    if (index >= window) sum -= values[index - window];
+    return index >= window - 1 ? sum / window : null;
+  });
+}
+
+export function PriceChart({ bars, intraday, referencePrice, showAverages = false, height = 320 }: {
   bars: Array<{ t: string; c: number | null; v: number | null }>;
   intraday: boolean;
   referencePrice?: number | null;
+  showAverages?: boolean;
   height?: number;
 }) {
-  const data = bars.filter((b) => b.c !== null).map((b) => ({ t: b.t, c: b.c as number, v: b.v ?? 0 }));
+  const base = bars.filter((b) => b.c !== null).map((b) => ({ t: b.t, c: b.c as number, v: b.v ?? 0 }));
+  const closes = base.map((b) => b.c);
+  const sma20 = showAverages ? movingAverage(closes, 20) : [];
+  const sma50 = showAverages ? movingAverage(closes, 50) : [];
+  const data = base.map((b, i) => (showAverages ? { ...b, sma20: sma20[i], sma50: sma50[i] } : b));
   if (data.length === 0) {
     return <div className="flex h-40 items-center justify-center text-sm text-muted">Bu aralık için veri yok.</div>;
   }
@@ -135,6 +149,9 @@ export function PriceChart({ bars, intraday, referencePrice, height = 320 }: {
           <ReferenceLine y={referencePrice} stroke="var(--text-muted)" strokeDasharray="4 4" label={{ value: "önceki kapanış", fill: "var(--text-muted)", fontSize: 10, position: "insideTopRight" }} />
         )}
         <Line type="monotone" dataKey="c" name="Fiyat" stroke={stroke} strokeWidth={2} dot={false} isAnimationActive={false} />
+        {showAverages && <Line type="monotone" dataKey="sma20" name="SMA 20" stroke={SERIES_1} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />}
+        {showAverages && <Line type="monotone" dataKey="sma50" name="SMA 50" stroke={SERIES_2} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />}
+        {showAverages && <Legend wrapperStyle={{ fontSize: 11 }} />}
       </LineChart>
     </ResponsiveContainer>
   );

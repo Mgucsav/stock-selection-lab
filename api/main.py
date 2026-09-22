@@ -57,6 +57,7 @@ from src.stock_selection.application import (  # noqa: E402
 )
 from src.stock_selection.data.providers.base import INTRADAY_LIMITS  # noqa: E402
 from src.stock_selection.demo import DEMO_SOURCE  # noqa: E402
+from src.stock_selection.features.stock_stats import compute_stock_stats  # noqa: E402
 from src.stock_selection.repositories.base import PortfolioRecord, ScoreRunRecord  # noqa: E402
 
 logger = logging.getLogger("api")
@@ -324,6 +325,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         year = daily.loc[daily["datetime"] >= last_dt - pd.Timedelta(days=365)] if not daily.empty else daily
         divs = daily.loc[daily["dividends"] > 0] if not daily.empty else daily
         div_12m = float(divs.loc[divs["datetime"] >= last_dt - pd.Timedelta(days=365), "dividends"].sum()) if not divs.empty else 0.0
+        stats = compute_stock_stats(daily, c.data.bundle().benchmark)
         ranking = None
         run = c.ranking.latest("balanced")
         if run:
@@ -342,6 +344,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
                 for r in divs.to_dict(orient="records")
             ][::-1],
             dividend_yield_12m=(div_12m / last_close) if last_close else None,
+            stats=stats,
             ranking=ranking, is_demo=c.data.bundle().source == DEMO_SOURCE,
         )
 

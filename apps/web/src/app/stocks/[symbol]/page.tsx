@@ -4,7 +4,8 @@ import Link from "next/link";
 import { use, useState } from "react";
 
 import { PriceChart } from "@/components/charts";
-import { Badge, Card, DemoBanner, ErrorBox, KeyValue, Loading, PageHeader, StatTile, WarningList } from "@/components/ui";
+import { DailySeriesTable, StockStatsPanel } from "@/components/StockStatsPanel";
+import { Badge, Card, DemoBanner, ErrorBox, Loading, PageHeader, StatTile, WarningList } from "@/components/ui";
 import { api } from "@/lib/api";
 import { CRITERIA_LABELS, formatCompact, formatDate, formatNumber, formatPct, signClass } from "@/lib/format";
 import { CRITERIA_ORDER, type HistoryInterval } from "@/lib/types";
@@ -28,6 +29,7 @@ function StockDetail({ symbol }: { symbol: string }) {
   const summary = usePolling(() => api.stock(symbol), 60_000, [symbol]);
   const [interval, setRange] = useState<HistoryInterval>("1d");
   const history = useApi(() => api.stockHistory(symbol, interval), [symbol, interval]);
+  const daily = useApi(() => api.stockHistory(symbol, "1d"), [symbol]);
   const s = summary.data;
   const q = s?.quote ?? null;
 
@@ -35,6 +37,7 @@ function StockDetail({ symbol }: { symbol: string }) {
   if (!s) return <Loading />;
 
   const bars = history.data?.bars ?? [];
+  const dailyBars = daily.data?.bars ?? [];
   const intraday = interval !== "1d";
   const oneDayBars = interval === "1m" && bars.length > 0 ? bars.filter((b) => b.t.slice(0, 10) === bars[bars.length - 1].t.slice(0, 10)) : bars;
 
@@ -95,7 +98,7 @@ function StockDetail({ symbol }: { symbol: string }) {
             {history.loading && !history.data && <Loading />}
             {history.data && (
               <>
-                <PriceChart bars={oneDayBars} intraday={intraday} referencePrice={interval === "1m" ? q?.previous_close : null} />
+                <PriceChart bars={oneDayBars} intraday={intraday} referencePrice={interval === "1m" ? q?.previous_close : null} showAverages={interval === "1d"} />
                 <p className="mt-1 text-[11px] text-muted">{history.data.count} bar · {history.data.label}. {history.data.warnings.join(" ")}</p>
               </>
             )}
@@ -107,22 +110,19 @@ function StockDetail({ symbol }: { symbol: string }) {
             <StatTile label="3 ay" value={formatPct(s.change_3m, 2, true)} delta={s.change_3m} tone="signed" />
             <StatTile label="1 yıl" value={formatPct(s.change_1y, 2, true)} delta={s.change_1y} tone="signed" />
           </div>
+
+          <StockStatsPanel stats={s.stats} />
+
+          <Card title="Günlük zaman serisi" subtitle="Son 60 işlem günü · açılış, yüksek, düşük, kapanış, hacim">
+            <DailySeriesTable bars={dailyBars} />
+            <p className="mt-1 text-[11px] text-muted">
+              Kapanışlar Yahoo Finance günlük serisinden; kurumsal işlem düzeltmesi getiri hesaplarında adj_close ile yapılır.
+            </p>
+          </Card>
         </div>
 
         <div className="space-y-3">
-          <Card title="Özet">
-            <KeyValue
-              items={[
-                ["52 hafta yüksek", formatNumber(s.high_52w, 2)],
-                ["52 hafta düşük", formatNumber(s.low_52w, 2)],
-                ["Son günlük kapanış", `${formatNumber(s.daily_last_close, 2)} (${formatDate(s.daily_last_date)})`],
-                ["Günlük gözlem", String(s.daily_rows)],
-                ["12 ay temettü verimi", formatPct(s.dividend_yield_12m, 2)],
-              ]}
-            />
-          </Card>
-
-          <Card title="Temettüler" subtitle="Yahoo Finance nakit temettü olayları (3 yıl)">
+          <Card title="Temettüler" subtitle={`Yahoo Finance nakit temettü olayları (3 yıl) · son 12 ay verimi ${formatPct(s.dividend_yield_12m, 2)}`}>
             {s.dividends.length === 0 ? (
               <p className="text-xs text-muted">Bu dönemde temettü gözlenmedi (no_dividend_observed).</p>
             ) : (

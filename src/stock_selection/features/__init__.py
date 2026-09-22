@@ -1,5 +1,6 @@
 """Kriter (özellik) hesaplama katmanı."""
 
+from .stock_stats import compute_stock_stats
 from .criteria import (
     CRITERIA_ORDER,
     CriteriaResult,
@@ -11,6 +12,7 @@ from .criteria import (
 
 __all__ = [
     "CRITERIA_ORDER",
+    "compute_stock_stats",
     "CriteriaResult",
     "compute_criteria",
     "downside_risk",

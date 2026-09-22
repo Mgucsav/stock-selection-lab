@@ -364,8 +364,42 @@ export interface StockSummary {
   low_52w: number | null;
   dividends: DividendEvent[];
   dividend_yield_12m: number | null;
+  stats: StockStats;
   ranking: (RankingRow & { score_run_id: string; data_as_of: string | null; profile_id: string }) | null;
   is_demo: boolean;
+}
+
+export interface StockStats {
+  observations: number;
+  first_date: string | null;
+  last_date: string | null;
+  last_close: number | null;
+  volatility_30d: number | null;
+  volatility_90d: number | null;
+  volatility_1y: number | null;
+  downside_risk: number | null;
+  max_drawdown_1y: number | null;
+  max_drawdown_all: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  sma200: number | null;
+  price_vs_sma50: number | null;
+  price_vs_sma200: number | null;
+  high_52w: number | null;
+  low_52w: number | null;
+  from_high_52w: number | null;
+  from_low_52w: number | null;
+  avg_volume_30d: number | null;
+  avg_tl_volume_30d: number | null;
+  positive_day_ratio: number | null;
+  best_day: number | null;
+  best_day_date: string | null;
+  worst_day: number | null;
+  worst_day_date: string | null;
+  beta_1y: number | null;
+  correlation_1y: number | null;
+  mean_daily_return: number | null;
+  annualized_mean_return: number | null;
 }
 
 export interface LivePosition {

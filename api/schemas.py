@@ -295,6 +295,7 @@ class StockSummaryResponse(BaseModel):
     low_52w: float | None
     dividends: list[DividendOut]
     dividend_yield_12m: float | None
+    stats: dict[str, Any]
     ranking: dict[str, Any] | None
     is_demo: bool
 

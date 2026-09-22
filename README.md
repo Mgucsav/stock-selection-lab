@@ -152,8 +152,11 @@ Yahoo Finance BIST kotasyonlarını **≈15 dakika gecikmeli** verir; tick akı�
 Uygulama bunu şöyle kullanır:
 
 - **Piyasa** (`/market`): 100 hissenin son fiyatı, günlük değişim, açılış/yüksek/düşük, hacim; 60 sn'de bir yenilenir.
-- **Hisse paneli** (`/stocks/THYAO.IS`): 1 dk (7 gün), 5 dk / 15 dk (60 gün), 1 saat (730 gün) ve günlük (3 yıl) grafik;
-  temettü listesi, 52 hafta aralığı, fpfs üyelikleri.
+- **Hisse paneli** (`/stocks/THYAO.IS`): 1 dk (7 gün), 5 dk / 15 dk (60 gün), 1 saat (730 gün) ve günlük (3 yıl,
+  SMA 20/50 ile) grafik; dönem getirileri; **temel istatistikler** (30/90/252 günlük yıllıklandırılmış volatilite,
+  yarı-mutlak sapma, maksimum düşüş, SMA 20/50/200 ve uzaklık, 52 hafta aralığı, ortalama lot/TL hacim, pozitif gün
+  oranı, en iyi/en kötü gün, BIST 100'e göre beta ve korelasyon); **günlük OHLCV zaman serisi tablosu**; temettü
+  listesi ve fpfs üyelikleri. Piyasa, sıralama, portföy ve panel tablolarındaki sembollerden bu sayfaya geçilir.
 - **Gün içi takip** (Panel ve portföy detayı): pozisyonlar × son fiyat + nakit → anlık değer, bugünkü değişim
   (önceki kapanışa göre), girişten bu yana K/Z. Resmî gün sonu değerleme ayrı tutulur.
 - Son fiyatlar 60 sn, gün içi barlar 5 dk TTL ile cache'lenir (oran sınırı için).
