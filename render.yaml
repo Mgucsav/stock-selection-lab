@@ -1,0 +1,19 @@
+# Render.com blueprint: backend'i tek tıkla konteyner olarak kurar.
+# Vercel'deki frontend NEXT_PUBLIC_API_BASE_URL ile bu servisin adresine bağlanır.
+services:
+  - type: web
+    name: stock-selection-lab-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: SSL_DATABASE_URL        # Supabase PostgreSQL: postgresql+psycopg://...
+        sync: false
+      - key: SSL_CORS_ORIGINS        # https://<vercel-projeniz>.vercel.app
+        sync: false
+      - key: SSL_DATA_PROVIDER
+        value: yahoo
+      - key: SSL_AUTO_REFRESH_HOURS
+        value: "20"
+      - key: SSL_PRICE_STORE
+        value: sql

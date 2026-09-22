@@ -1,0 +1,32 @@
+{
+  "_comment": "Varsayılan yatırımcı profilleri; başlangıç/demo parametreleridir, akademik olarak doğrulanmış evrensel profiller değildir. Bu dosyayı düzenleyerek ağırlıkları, hisse sayısını ve tavanı değiştirebilirsiniz. Dengeli profil seminerdeki ağırlıkları kullanır.",
+  "profiles": [
+    {
+      "id": "conservative",
+      "label": "Muhafazakâr",
+      "description": "Aşağı yönlü riske ve likiditeye en yüksek önem; ilk 15 hisse, ters-risk ağırlık, tek hisse en çok %10.",
+      "weights": { "return": 0.55, "dividend": 0.75, "liquidity": 0.80, "risk": 1.00 },
+      "portfolio_size": 15,
+      "max_weight": 0.10,
+      "weighting_scheme": "inverse_downside_risk"
+    },
+    {
+      "id": "balanced",
+      "label": "Dengeli",
+      "description": "Seminerdeki ağırlıklar; ilk 10 hisse, %50 fpfs skor payı + %50 ters-risk payı, tek hisse en çok %15.",
+      "weights": { "return": 0.80, "dividend": 0.60, "liquidity": 0.60, "risk": 0.80 },
+      "portfolio_size": 10,
+      "max_weight": 0.15,
+      "weighting_scheme": "half_score_half_inverse_risk"
+    },
+    {
+      "id": "aggressive",
+      "label": "Agresif",
+      "description": "Getiriye tam önem; ilk 7 hisse, fpfs skoruyla orantılı ağırlık, tek hisse en çok %20.",
+      "weights": { "return": 1.00, "dividend": 0.35, "liquidity": 0.55, "risk": 0.55 },
+      "portfolio_size": 7,
+      "max_weight": 0.20,
+      "weighting_scheme": "score_proportional"
+    }
+  ]
+}

@@ -9,3 +9,22 @@ data/raw/*
 data/processed/*
 data/rejected/*
 !data/**/.gitkeep
+
+# Uygulama durumu ve cache (Git'e eklenmez)
+data/cache/*
+data/demo/*
+!data/cache/.gitkeep
+!data/demo/.gitkeep
+state/*
+!state/.gitkeep
+*.parquet
+*.db
+*.db-journal
+.env.local
+
+# Frontend
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/*.tsbuildinfo
+apps/web/next-env.d.ts
