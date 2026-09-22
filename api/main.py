@@ -82,10 +82,11 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         app.state.container.auto_refresh.stop()
 
     app = FastAPI(title="Stock Selection Lab API", version=MODEL_VERSION, lifespan=lifespan)
-    settings_origins = (container.settings.cors_origins if container else build_container_origins())
+    cors_settings = container.settings if container else _load_settings()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(settings_origins),
+        allow_origins=list(cors_settings.cors_origins),
+        allow_origin_regex=cors_settings.cors_origin_regex,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -363,10 +364,10 @@ def _f(value) -> float | None:
         return None
 
 
-def build_container_origins() -> tuple[str, ...]:
+def _load_settings():
     from src.stock_selection.settings import load_settings
 
-    return load_settings().cors_origins
+    return load_settings()
 
 
 app = create_app()

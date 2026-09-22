@@ -9,8 +9,10 @@ services:
     envVars:
       - key: SSL_DATABASE_URL        # Supabase PostgreSQL: postgresql+psycopg://...
         sync: false
-      - key: SSL_CORS_ORIGINS        # https://<vercel-projeniz>.vercel.app
+      - key: SSL_CORS_ORIGINS        # https://<vercel-projeniz>.vercel.app (özel alan adı varsa onu da ekleyin)
         sync: false
+      - key: SSL_CORS_ORIGIN_REGEX   # Vercel önizleme dağıtımları
+        value: "https://.*\.vercel\.app"
       - key: SSL_DATA_PROVIDER
         value: yahoo
       - key: SSL_AUTO_REFRESH_HOURS
