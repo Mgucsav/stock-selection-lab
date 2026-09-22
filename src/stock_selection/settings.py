@@ -94,6 +94,10 @@ class Settings:
     stale_days: int = field(default_factory=lambda: _env_int("SSL_STALE_DAYS", 7))
     # Günlük veri bu kadar saatten eskiyse (veya demo modundaysa) backend arka planda kendisi yeniler; 0 = kapalı
     auto_refresh_hours: int = field(default_factory=lambda: _env_int("SSL_AUTO_REFRESH_HOURS", 20))
+    # Gecikmeli fiyat anlık görüntüsünün arka planda yenilenme sıklığı (saniye); 0 = arka plan kapalı
+    quote_poll_seconds: int = field(default_factory=lambda: _env_int("SSL_QUOTE_POLL_SECONDS", 45))
+    # Borsa kapalıyken daha seyrek yenile
+    quote_idle_poll_seconds: int = field(default_factory=lambda: _env_int("SSL_QUOTE_IDLE_POLL_SECONDS", 600))
     # Vercel önizleme adresleri gibi değişken alan adları için düzenli ifade (örn. https://.*\.vercel\.app)
     cors_origin_regex: str | None = field(default_factory=lambda: os.environ.get("SSL_CORS_ORIGIN_REGEX") or None)
     cors_origins: tuple[str, ...] = field(

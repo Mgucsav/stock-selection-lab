@@ -226,6 +226,8 @@ class ErrorResponse(BaseModel):
 
 class QuoteOut(BaseModel):
     symbol: str
+    market_state: str | None = None
+    delayed_by_minutes: int | None = None
     name: str | None = None
     sector: str | None = None
     last_price: float | None
@@ -247,6 +249,9 @@ class QuotesResponse(BaseModel):
     is_demo: bool
     fetched_at: str | None
     from_cache: bool
+    delayed_by_minutes: int | None = None
+    market_state: str | None = None
+    poll: dict[str, Any] | None = None
     message: str | None = None
     quotes: list[QuoteOut]
 

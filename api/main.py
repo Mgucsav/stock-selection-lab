@@ -79,8 +79,10 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         except Exception as error:  # pragma: no cover
             logger.warning("Veri ısındırma başarısız: %s", error)
         app.state.container.auto_refresh.start()  # günlük veriyi arka planda güncel tut (kapalıysa no-op)
+        app.state.container.quotes.start_poller()  # fiyat anlık görüntüsünü arka planda tazele
         yield
         app.state.container.auto_refresh.stop()
+        app.state.container.quotes.stop()
 
     app = FastAPI(title="Stock Selection Lab API", version=MODEL_VERSION, lifespan=lifespan)
     cors_settings = container.settings if container else _load_settings()
@@ -265,8 +267,13 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         u = c.data.universe()
         wanted = [s.strip().upper() for s in symbols.split(",") if s.strip()] if symbols else u.symbols
         quote_list, from_cache = c.quotes.quotes(wanted, force=force)
+        delays = [q.delayed_by_minutes for q in quote_list if q.delayed_by_minutes is not None]
+        states = [q.market_state for q in quote_list if q.market_state]
         return QuotesResponse(
             label=QUOTE_LABEL, available=c.quotes.enabled, is_demo=c.data.bundle().source == DEMO_SOURCE,
+            delayed_by_minutes=max(delays) if delays else None,
+            market_state=states[0] if states else None,
+            poll=dict(c.quotes.poll_state),
             fetched_at=c.quotes.last_fetch_at.isoformat() if c.quotes.last_fetch_at else None, from_cache=from_cache,
             message=_demo_message(c), quotes=[_quote_out(q, u.name_map, u.sector_map) for q in quote_list],
         )

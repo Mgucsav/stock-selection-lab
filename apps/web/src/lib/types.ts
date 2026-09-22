@@ -293,6 +293,8 @@ export interface PortfolioDetail {
 
 export interface Quote {
   symbol: string;
+  market_state: string | null;
+  delayed_by_minutes: number | null;
   name: string | null;
   sector: string | null;
   last_price: number | null;
@@ -314,6 +316,9 @@ export interface QuotesResponse {
   is_demo: boolean;
   fetched_at: string | null;
   from_cache: boolean;
+  delayed_by_minutes: number | null;
+  market_state: string | null;
+  poll: { enabled: boolean; last_run_at: string | null; last_duration: number | null; last_error: string | null; symbols: number; market_open: boolean | null } | null;
   message: string | null;
   quotes: Quote[];
 }

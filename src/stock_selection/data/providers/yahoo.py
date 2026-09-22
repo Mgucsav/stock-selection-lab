@@ -33,6 +33,11 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# Toplu kotasyon ucu: 100 sembolü tek istekte (~1 sn) verir; son fiyat, önceki kapanış,
+# açılış/yüksek/düşük, hacim ve sağlayıcının bildirdiği gecikme aynı yanıtta gelir.
+QUOTE_ENDPOINT = "https://query2.finance.yahoo.com/v7/finance/quote"
+QUOTE_BATCH_SIZE = 50
+
 _YF_COLUMN_MAP = {
     "Open": "open",
     "High": "high",
@@ -48,6 +53,14 @@ def _chunks(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), max(size, 1))]
 
 
+def _as_float(value: object) -> float | None:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
 class YahooFinanceProvider:
     """yfinance üzerinden günlük OHLCV + temettü verisi indirir."""
 
@@ -61,6 +74,7 @@ class YahooFinanceProvider:
         sleep: Callable[[float], None] = time.sleep,
         downloader: Callable[..., pd.DataFrame] | None = None,
         intraday_downloader: Callable[..., pd.DataFrame] | None = None,
+        quote_fetcher: Callable[[list[str]], dict] | None = None,
     ) -> None:
         self.batch_size = batch_size
         self.max_retries = max_retries
@@ -68,6 +82,7 @@ class YahooFinanceProvider:
         self._sleep = sleep
         self._downloader = downloader
         self._intraday_downloader = intraday_downloader
+        self._quote_fetcher = quote_fetcher
 
     # ----------------------------------------------------------------- yfinance
     def _download(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
@@ -291,8 +306,62 @@ class YahooFinanceProvider:
             return empty_intraday_frame()
         return pd.concat(frames, ignore_index=True).sort_values(["symbol", "datetime"]).reset_index(drop=True)
 
+    # ----------------------------------------------------------------- quotes
+    def _quote_json(self, symbols: list[str]) -> dict:
+        """Yahoo toplu kotasyon yanıtı (yfinance oturumu cookie/crumb yönetir)."""
+        if self._quote_fetcher is not None:
+            return self._quote_fetcher(symbols)
+        from yfinance.data import YfData
+
+        return YfData().get_raw_json(QUOTE_ENDPOINT, params={"symbols": ",".join(symbols)})
+
+    @staticmethod
+    def _exchange_time(epoch: float | None) -> datetime | None:
+        """Epoch saniyeyi borsa saatine (Europe/Istanbul, tz-naive) çevirir."""
+        if not epoch:
+            return None
+        from zoneinfo import ZoneInfo
+
+        return datetime.fromtimestamp(float(epoch), timezone.utc).astimezone(ZoneInfo("Europe/Istanbul")).replace(tzinfo=None)
+
     def fetch_quotes(self, symbols: list[str]) -> list[Quote]:
-        """Son günün 1 dk barlarından son fiyat, son 5 günün saatlik barlarından önceki kapanış.
+        """Toplu kotasyon ucundan son fiyatlar; uç çalışmazsa gün içi barlara düşer."""
+        wanted = list(dict.fromkeys(symbols))
+        found: dict[str, Quote] = {}
+        failed_batches: list[str] = []
+        for batch in _chunks(wanted, QUOTE_BATCH_SIZE):
+            try:
+                payload = self._quote_json(batch)
+            except Exception as error:
+                logger.warning("Toplu kotasyon alınamadı, gün içi barlara düşülüyor: %s", error)
+                failed_batches.extend(batch)
+                continue
+            for item in (payload.get("quoteResponse") or {}).get("result") or []:
+                symbol = str(item.get("symbol", ""))
+                price = item.get("regularMarketPrice")
+                if not symbol or price is None:
+                    continue
+                found[symbol] = Quote(
+                    symbol=symbol,
+                    last_price=float(price),
+                    last_time=self._exchange_time(item.get("regularMarketTime")),
+                    day_open=_as_float(item.get("regularMarketOpen")),
+                    day_high=_as_float(item.get("regularMarketDayHigh")),
+                    day_low=_as_float(item.get("regularMarketDayLow")),
+                    day_volume=_as_float(item.get("regularMarketVolume")),
+                    previous_close=_as_float(item.get("regularMarketPreviousClose")),
+                    market_state=item.get("marketState"),
+                    delayed_by_minutes=item.get("exchangeDataDelayedBy"),
+                )
+        missing = [s for s in wanted if s not in found]
+        if missing:
+            # Uç yanıt vermediyse ya da sembolü atladıysa eski (yavaş ama çalışan) yol
+            for quote in self._quotes_from_intraday(missing):
+                found.setdefault(quote.symbol, quote)
+        return [found.get(s, Quote(s, None, None, outcome=FetchOutcome.NO_DATA, message="Kotasyon bulunamadı")) for s in wanted]
+
+    def _quotes_from_intraday(self, symbols: list[str]) -> list[Quote]:
+        """Yedek yol: son günün 1 dk barlarından son fiyat, saatlik barlardan önceki kapanış.
 
         Önceki kapanış günlük seriden alınmaz: Yahoo günlük seride son günleri
         eksik/NaN verebilir; gün içi barlar bu konuda daha güvenilirdir.

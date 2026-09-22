@@ -60,6 +60,7 @@ def test_settings(tmp_path: Path, session_demo_dir: Path) -> Settings:
         auto_refresh_hours=0,  # testlerde arka plan yenileme kapalı
         price_store="sql",  # pyarrow'a bağımlı olmadan (SQLite tabloları)
         cors_origins=("http://localhost:3000",),
+        quote_poll_seconds=0,  # testlerde arka plan fiyat yenileme kapalı
     )
 
 

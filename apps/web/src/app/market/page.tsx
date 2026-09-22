@@ -57,8 +57,15 @@ export default function MarketPage() {
       <PageHeader title="Piyasa" description="BIST 100 hisselerinin son fiyatları. Yahoo Finance ≈15 dakika gecikmeli; 60 saniyede bir yenilenir. Sembole tıklayınca hisse paneli açılır.">
         {d && (
           <>
-            <Badge tone="warning">{d.label}</Badge>
-            <span className="text-xs text-muted">Sağlayıcıdan çekildi: {formatDateTime(d.fetched_at)} · {up} ▲ / {down} ▼</span>
+            <Badge tone={d.market_state === "REGULAR" ? "good" : "neutral"}>
+              {d.market_state === "REGULAR" ? "Piyasa açık" : "Piyasa kapalı"}
+            </Badge>
+            <Badge tone="warning">{d.delayed_by_minutes ? `≈${d.delayed_by_minutes} dk gecikmeli` : d.label}</Badge>
+            <span className="text-xs text-muted">
+              Fiyatlar: {formatDateTime(d.fetched_at)} · {up} ▲ / {down} ▼
+              {d.poll?.enabled && d.poll.last_duration != null && ` · arka plan yenileme ${d.poll.last_duration}s`}
+              {d.poll?.last_error && <span className="text-warning"> · yenileme hatası</span>}
+            </span>
             <button className="btn text-xs" onClick={quotes.refresh}>Şimdi yenile</button>
           </>
         )}

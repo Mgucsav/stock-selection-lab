@@ -125,3 +125,90 @@ def test_yahoo_intraday_parsing_and_quote_derivation():
     assert quote.outcome == FetchOutcome.OK
     with pytest.raises(ValueError):
         provider.fetch_intraday(["A.IS"], "2m", "1d")
+
+
+def test_quote_service_serves_stale_cache_without_blocking(container, monkeypatch):
+    """Süresi geçmiş fiyat, sağlayıcı beklenmeden cache'ten döner; tazeleme arka planda olur."""
+    import time as time_module
+
+    from src.stock_selection.application import QuoteService
+
+    container.data.refresh()
+    clock = [1000.0]
+    service = QuoteService(container.data, container.data.provider, quote_ttl=30, clock=lambda: clock[0])
+    first, cached = service.quotes(["AKBNK.IS"])
+    assert cached is False and first[0].last_price is not None
+    calls_before = container.data.provider.quote_calls
+
+    clock[0] += 120  # cache bayatladı
+    slow = []
+    original = container.data.provider.fetch_quotes
+
+    def slow_fetch(symbols):
+        slow.append(symbols)
+        time_module.sleep(0.3)
+        return original(symbols)
+
+    container.data.provider.fetch_quotes = slow_fetch
+    started = time_module.perf_counter()
+    stale_result, _ = service.quotes(["AKBNK.IS"])
+    elapsed = time_module.perf_counter() - started
+    assert elapsed < 0.2, "bayat fiyat sağlayıcı beklenmeden dönmeliydi"
+    assert stale_result[0].last_price == first[0].last_price
+    time_module.sleep(0.6)  # arka plan tazelemesi
+    assert container.data.provider.quote_calls > calls_before
+
+
+def test_market_hours_guard():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from src.stock_selection.application import QuoteService
+
+    ist = ZoneInfo("Europe/Istanbul")
+    assert QuoteService.market_is_open(datetime(2026, 9, 22, 11, 0, tzinfo=ist)) is True
+    assert QuoteService.market_is_open(datetime(2026, 9, 22, 9, 30, tzinfo=ist)) is False
+    assert QuoteService.market_is_open(datetime(2026, 9, 22, 19, 0, tzinfo=ist)) is False
+    assert QuoteService.market_is_open(datetime(2026, 9, 20, 11, 0, tzinfo=ist)) is False  # pazar
+
+
+def test_yahoo_batch_quote_endpoint_parsing_and_fallback():
+    """Toplu kotasyon ucu ayrıştırılır; uç sembolü atlarsa gün içi bar yedeğine düşülür."""
+    payload = {
+        "quoteResponse": {
+            "result": [
+                {
+                    "symbol": "A.IS", "regularMarketPrice": 10.5, "regularMarketPreviousClose": 10.0,
+                    "regularMarketOpen": 10.1, "regularMarketDayHigh": 10.8, "regularMarketDayLow": 9.9,
+                    "regularMarketVolume": 1234, "regularMarketTime": 1790000000,
+                    "marketState": "REGULAR", "exchangeDataDelayedBy": 15,
+                }
+            ]
+        }
+    }
+    idx = pd.date_range("2026-09-18 09:55", periods=2, freq="1min", tz="Europe/Istanbul")
+    cols = pd.MultiIndex.from_product([["B.IS"], ["Open", "High", "Low", "Close", "Adj Close", "Volume"]])
+    bars = pd.DataFrame([[5, 5.2, 4.9, 5.1, 5.1, 10], [5.1, 5.3, 5.0, 5.2, 5.2, 12]], index=idx, columns=cols)
+    provider = YahooFinanceProvider(
+        quote_fetcher=lambda symbols: payload,
+        intraday_downloader=lambda symbols, interval, period: bars,
+        sleep=lambda _: None,
+    )
+    quotes = {q.symbol: q for q in provider.fetch_quotes(["A.IS", "B.IS"])}
+    assert quotes["A.IS"].last_price == 10.5 and quotes["A.IS"].previous_close == 10.0
+    assert quotes["A.IS"].day_change_pct == pytest.approx(0.05)
+    assert quotes["A.IS"].market_state == "REGULAR" and quotes["A.IS"].delayed_by_minutes == 15
+    assert quotes["B.IS"].last_price == 5.2  # yedek yoldan geldi
+
+
+def test_quote_endpoint_failure_falls_back_entirely():
+    idx = pd.date_range("2026-09-18 09:55", periods=2, freq="1min", tz="Europe/Istanbul")
+    cols = pd.MultiIndex.from_product([["A.IS"], ["Open", "High", "Low", "Close", "Adj Close", "Volume"]])
+    bars = pd.DataFrame([[5, 5.2, 4.9, 5.1, 5.1, 10], [5.1, 5.3, 5.0, 5.2, 5.2, 12]], index=idx, columns=cols)
+
+    def broken(_symbols):
+        raise ConnectionError("uç kapalı")
+
+    provider = YahooFinanceProvider(quote_fetcher=broken, intraday_downloader=lambda s, i, p: bars, sleep=lambda _: None)
+    quote = provider.fetch_quotes(["A.IS"])[0]
+    assert quote.last_price == 5.2 and quote.outcome == FetchOutcome.OK

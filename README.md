@@ -159,7 +159,12 @@ Uygulama bunu şöyle kullanır:
   listesi ve fpfs üyelikleri. Piyasa, sıralama, portföy ve panel tablolarındaki sembollerden bu sayfaya geçilir.
 - **Gün içi takip** (Panel ve portföy detayı): pozisyonlar × son fiyat + nakit → anlık değer, bugünkü değişim
   (önceki kapanışa göre), girişten bu yana K/Z. Resmî gün sonu değerleme ayrı tutulur.
-- Son fiyatlar 60 sn, gün içi barlar 5 dk TTL ile cache'lenir (oran sınırı için).
+- **Fiyat yolu (hız):** 100 sembolün son fiyatı Yahoo'nun toplu kotasyon ucundan **tek istekte (~1,5 sn)** alınır;
+  uç yanıt vermezse gün içi barlardan türeten yedek yola düşülür. `QuoteService` bu anlık görüntüyü arka planda
+  (`SSL_QUOTE_POLL_SECONDS`, varsayılan 45 sn; borsa kapalıyken `SSL_QUOTE_IDLE_POLL_SECONDS`) tazeler, HTTP isteği
+  sağlayıcıyı beklemez: `/api/v1/quotes` cache'ten **~80 ms** döner. Bayat kayıt önce döndürülür, tazeleme arka planda
+  yapılır (stale-while-revalidate). Gün içi barlar 5 dk TTL ile cache'lenir.
+- Yanıt, sağlayıcının bildirdiği gecikmeyi (`delayed_by_minutes`, BIST için 15) ve piyasa durumunu (`market_state`) taşır.
 - **Günlük veri otomatik yenilenir:** backend açılışta ve her saat başı kontrol eder; veri demo ise veya son başarılı
   güncelleme `SSL_AUTO_REFRESH_HOURS` (varsayılan 20) saatten eskiyse arka planda `refresh` çalıştırır. Durum Veri Sağlığı'nda görünür; `0` ile kapatılır.
 - Yahoo günlük seride son günleri eksik/NaN verirse `data/refresh` bu günleri **saatlik barlardan günlük OHLCV** olarak türetir ve uyarı yazar.

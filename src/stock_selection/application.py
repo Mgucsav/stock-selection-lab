@@ -782,7 +782,8 @@ class QuoteService:
     """
 
     def __init__(self, data: MarketDataService, provider: MarketDataProvider,
-                 quote_ttl: float = 60.0, history_ttl: float = 300.0, clock: Callable[[], float] = time.time) -> None:
+                 quote_ttl: float = 60.0, history_ttl: float = 300.0, clock: Callable[[], float] = time.time,
+                 poll_seconds: int = 0, idle_poll_seconds: int = 600) -> None:
         self.data = data
         self.provider = provider
         self.quote_ttl = quote_ttl
@@ -792,6 +793,55 @@ class QuoteService:
         self._quotes: dict[str, tuple[float, Quote]] = {}
         self._history: dict[tuple[str, str], tuple[float, pd.DataFrame]] = {}
         self.last_fetch_at: datetime | None = None
+        self.poll_seconds = poll_seconds
+        self.idle_poll_seconds = idle_poll_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._refreshing: set[str] = set()
+        self.poll_state: dict[str, Any] = {"enabled": poll_seconds > 0, "last_run_at": None, "last_duration": None,
+                                           "last_error": None, "symbols": 0, "market_open": None}
+
+    # ------------------------------------------------------ arka plan yenileme
+    @staticmethod
+    def market_is_open(now: datetime | None = None) -> bool:
+        """BIST pay piyasası saatleri (TSİ 09:55–18:15, hafta içi); tatiller hariç tutulmaz."""
+        from zoneinfo import ZoneInfo
+
+        local = now or datetime.now(ZoneInfo("Europe/Istanbul"))
+        if local.weekday() >= 5:
+            return False
+        minutes = local.hour * 60 + local.minute
+        return 9 * 60 + 55 <= minutes <= 18 * 60 + 15
+
+    def refresh_snapshot(self) -> None:
+        """Bütün evrenin fiyatlarını tek turda tazeler (istek beklemeden)."""
+        symbols = self.data.universe().symbols + [self.data.settings.benchmark_symbol]
+        started = self._clock()
+        try:
+            self.quotes(symbols, force=True)
+            self.poll_state.update(last_error=None, symbols=len(symbols))
+        except Exception as error:  # ağ/oran sınırı: mevcut anlık görüntü korunur
+            self.poll_state["last_error"] = str(error)
+            logger.warning("Fiyat anlık görüntüsü yenilenemedi: %s", error)
+        finally:
+            self.poll_state.update(last_run_at=_now().isoformat(), last_duration=round(self._clock() - started, 2),
+                                   market_open=self.market_is_open())
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            if self.enabled:
+                self.refresh_snapshot()
+            wait = self.poll_seconds if self.market_is_open() else self.idle_poll_seconds
+            self._stop.wait(max(wait, 5))
+
+    def start_poller(self) -> None:
+        if self.poll_seconds <= 0 or self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._loop, name="quote-poller", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
 
     @property
     def enabled(self) -> bool:
@@ -813,15 +863,50 @@ class QuoteService:
             return [Quote(s, None, None, outcome=FetchOutcome.NO_DATA, message="Demo modunda canlı fiyat yok") for s in symbols], True
         now = self._clock()
         with self._lock:
-            missing = [s for s in symbols if force or s not in self._quotes or now - self._quotes[s][0] > self.quote_ttl]
-            if missing:
-                fetched = self.provider.fetch_quotes(missing)
-                for q in fetched:
-                    if q.previous_close is None:  # sağlayıcı veremediyse günlük cache'ten (daha eski olabilir)
-                        q.previous_close = self.previous_close(q.symbol, q.last_time.date() if q.last_time else None)
-                    self._quotes[q.symbol] = (now, q)
-                self.last_fetch_at = _now()
-            return [self._quotes[s][1] for s in symbols], not missing
+            stale = [s for s in symbols if s in self._quotes and now - self._quotes[s][0] > self.quote_ttl]
+            absent = [s for s in symbols if s not in self._quotes]
+        # Elde hiç fiyat yoksa beklenir; sadece bayatsa önce cache verilir, tazeleme arka planda yapılır.
+        must_fetch = absent if not force else list(dict.fromkeys(symbols))
+        if must_fetch:
+            self._fetch_into_cache(must_fetch)
+        elif stale:
+            self._refresh_async(stale)
+        with self._lock:
+            result = [self._quotes[s][1] for s in symbols if s in self._quotes]
+            missing = [s for s in symbols if s not in self._quotes]
+        for symbol in missing:
+            result.append(Quote(symbol, None, None, outcome=FetchOutcome.NO_DATA, message="Fiyat alınamadı"))
+        order = {q.symbol: q for q in result}
+        return [order[s] for s in symbols if s in order], not must_fetch
+
+    def _fetch_into_cache(self, symbols: list[str]) -> None:
+        fetched = self.provider.fetch_quotes(symbols)
+        now = self._clock()
+        with self._lock:
+            for q in fetched:
+                if q.previous_close is None:  # sağlayıcı veremediyse günlük tablodan (daha eski olabilir)
+                    q.previous_close = self.previous_close(q.symbol, q.last_time.date() if q.last_time else None)
+                self._quotes[q.symbol] = (now, q)
+            self.last_fetch_at = _now()
+
+    def _refresh_async(self, symbols: list[str]) -> None:
+        """Bayat fiyatları arka planda tazeler; aynı semboller için tek iş çalışır."""
+        with self._lock:
+            pending = [s for s in symbols if s not in self._refreshing]
+            self._refreshing.update(pending)
+        if not pending:
+            return
+
+        def run() -> None:
+            try:
+                self._fetch_into_cache(pending)
+            except Exception as error:
+                logger.warning("Arka plan fiyat tazeleme başarısız: %s", error)
+            finally:
+                with self._lock:
+                    self._refreshing.difference_update(pending)
+
+        threading.Thread(target=run, name="quote-refresh", daemon=True).start()
 
     def history(self, symbol: str, interval: str) -> pd.DataFrame:
         """``1d`` günlük cache'ten; diğer aralıklar sağlayıcıdan (TTL ile)."""
@@ -969,7 +1054,8 @@ def build_container(settings: Settings | None = None, provider: MarketDataProvid
     data = MarketDataService(settings, universe_loader, provider, store, uow_factory)
     ranking = RankingService(data, profiles, uow_factory, settings)
     portfolios = PortfolioService(data, ranking, profiles, uow_factory, settings)
-    quotes = QuoteService(data, provider)
+    quotes = QuoteService(data, provider, poll_seconds=settings.quote_poll_seconds,
+                          idle_poll_seconds=settings.quote_idle_poll_seconds)
     auto_refresh = AutoRefresher(data, settings.auto_refresh_hours)
     return AppContainer(settings=settings, data=data, ranking=ranking, portfolios=portfolios, profiles=profiles,
                         quotes=quotes, auto_refresh=auto_refresh)

@@ -81,6 +81,8 @@ class Quote:
     day_low: float | None = None
     day_volume: float | None = None
     previous_close: float | None = None
+    market_state: str | None = None          # REGULAR / CLOSED / PRE / POST
+    delayed_by_minutes: int | None = None     # sağlayıcının bildirdiği gecikme
     outcome: FetchOutcome = FetchOutcome.OK
     message: str = ""
 
@@ -106,6 +108,8 @@ class Quote:
             "day_low": self.day_low,
             "day_volume": self.day_volume,
             "previous_close": self.previous_close,
+            "market_state": self.market_state,
+            "delayed_by_minutes": self.delayed_by_minutes,
             "day_change": self.day_change,
             "day_change_pct": self.day_change_pct,
             "outcome": self.outcome.value,
