@@ -101,12 +101,14 @@ class MarketDataService:
         provider: MarketDataProvider,
         store: PriceStore,
         uow_factory: Callable[[], SqlAlchemyUnitOfWork],
+        secondary: Any | None = None,
     ) -> None:
         self.settings = settings
         self._universe_loader = universe_loader
         self.provider = provider
         self.store = store
         self.uow_factory = uow_factory
+        self.secondary = secondary  # doğrulama/tamamlama kaynağı (ör. İş Yatırım)
         self._bundle: DataBundle | None = None
 
     # ----------------------------------------------------------- universe
@@ -144,6 +146,24 @@ class MarketDataService:
         with self.uow_factory() as uow:
             uow.data_status.save(status)
             uow.commit()
+
+    def free_float_market_cap(self) -> dict[str, float]:
+        """Sembol başına son fiili dolaşım piyasa değeri (gerçek devir hızı paydası)."""
+        try:
+            frame = self.store.load_fundamentals()
+        except Exception as error:  # depo desteklemiyorsa sessizce proxy'ye düş
+            logger.warning("Fiili dolaşım piyasa değeri okunamadı: %s", error)
+            return {}
+        if frame is None or frame.empty:
+            return {}
+        frame = frame.copy()
+        frame["date"] = pd.to_datetime(frame["date"])
+        latest = frame.sort_values("date").groupby("symbol").tail(1)
+        return {
+            str(row.symbol): float(row.free_float_market_cap)
+            for row in latest.itertuples()
+            if float(row.free_float_market_cap) > 0
+        }
 
     # --------------------------------------------------------------- load
     def bundle(self) -> DataBundle:
@@ -304,23 +324,127 @@ class MarketDataService:
             raise DataUnavailableError(message)
 
         raw_frame, session_warnings = self._drop_open_session(result.frame)
-        raw_frame, backfill_warnings = self._backfill_recent_days(raw_frame)
-        backfill_warnings = session_warnings + backfill_warnings
+        raw_frame, fundamentals, verification = self._verify_and_complete(raw_frame, universe, end)
+        if not verification.get("available"):
+            # İkincil kaynak yoksa/başarısızsa eksik günleri saatlik barlardan türetmeye devam et
+            raw_frame, fill_warnings = self._backfill_recent_days(raw_frame)
+        else:
+            fill_warnings = []
+        backfill_warnings = session_warnings + fill_warnings + list(verification.get("warnings", []))
         cleaned = clean_raw_prices(raw_frame, reference_date=end, stale_days=self.settings.stale_days)
         benchmark = cleaned.clean.loc[cleaned.clean["symbol"] == self.settings.benchmark_symbol].copy()
         clean = cleaned.clean.loc[cleaned.clean["symbol"] != self.settings.benchmark_symbol].copy()
         self.store.save_raw(raw_frame)
         self.store.save_clean(clean)
         self.store.save_benchmark(benchmark)
+        if fundamentals is not None and not fundamentals.empty:
+            self.store.save_fundamentals(fundamentals)
 
         status = self._build_status(
             universe, cleaned, result.provider, ok=ok_stock, failed=[], benchmark_ok=not benchmark.empty,
             error=None, refreshed_at=refreshed_at, success_at=refreshed_at, provider_statuses=provider_statuses,
             extra_warnings=backfill_warnings,
         )
+        status["verification"] = verification
         self._save_status(status)
         self._bundle = DataBundle(clean, benchmark, result.provider, status)
         return status
+
+    def _verify_and_complete(
+        self, raw: pd.DataFrame, universe: Universe, end: date
+    ) -> tuple[pd.DataFrame, pd.DataFrame | None, dict[str, Any]]:
+        """İkincil kaynakla (İş Yatırım) kapanışları karşılaştırır ve eksik günleri tamamlar.
+
+        Üç çıktı üretir: tamamlanmış ham tablo, fiili dolaşım piyasa değeri tablosu ve
+        Veri Sağlığı ekranında gösterilen doğrulama raporu. Sapmalar gizlenmez; tolerans
+        (``SSL_VERIFICATION_TOLERANCE``) üstündeki semboller raporda listelenir.
+        """
+        report: dict[str, Any] = {"available": False, "provider": getattr(self.secondary, "name", None),
+                                  "warnings": [], "tolerance": self.settings.verification_tolerance}
+        if self.secondary is None:
+            report["message"] = "İkincil doğrulama kaynağı kapalı (SSL_SECONDARY_PROVIDER=none)."
+            return raw, None, report
+
+        window_start = end - timedelta(days=max(self.settings.verification_days, 1))
+        started = _now()
+        try:
+            batch, fundamentals = self.secondary.fetch_window(universe.symbols, window_start, end)
+        except Exception as error:
+            report["message"] = f"İkincil kaynak hatası: {error}"
+            report["warnings"].append(f"İkincil kaynakla doğrulama yapılamadı: {error}")
+            return raw, None, report
+
+        reference, _ = self._drop_open_session(batch.frame)
+        if reference.empty:
+            report["message"] = "İkincil kaynaktan satır gelmedi."
+            report["warnings"].append("İkincil kaynaktan doğrulama verisi alınamadı.")
+            return raw, None, report
+
+        reference = reference.copy()
+        reference["date"] = pd.to_datetime(reference["date"]).dt.normalize()
+        working = raw.copy()
+        working["date"] = pd.to_datetime(working["date"]).dt.normalize()
+        primary_close = pd.to_numeric(working["close"], errors="coerce")
+        valid = working.loc[primary_close > 0]
+        have = set(zip(valid["symbol"], valid["date"]))
+
+        # --- eksik (symbol, date) çiftlerini ikincil kaynaktan tamamla
+        mask_missing = [(sym, dt) not in have for sym, dt in zip(reference["symbol"], reference["date"])]
+        fill = reference.loc[mask_missing]
+        filled_rows = int(len(fill))
+        if filled_rows:
+            drop_keys = set(zip(fill["symbol"], fill["date"]))
+            keep = [(sym, dt) not in drop_keys for sym, dt in zip(working["symbol"], working["date"])]
+            working = pd.concat([working.loc[keep], fill.loc[:, working.columns]], ignore_index=True)
+            working = working.sort_values(["symbol", "date"]).reset_index(drop=True)
+            report["warnings"].append(
+                f"{filled_rows} sembol-gün birincil kaynakta eksikti; İş Yatırım kapanışlarıyla tamamlandı."
+            )
+
+        # --- örtüşen günlerde kapanış karşılaştırması
+        merged = valid.merge(
+            reference.loc[:, ["symbol", "date", "close", "adj_close"]],
+            on=["symbol", "date"], how="inner", suffixes=("", "_ref"),
+        )
+        deviations = pd.Series(dtype=float)
+        offenders: list[dict[str, Any]] = []
+        if not merged.empty:
+            base = pd.to_numeric(merged["close"], errors="coerce")
+            other = pd.to_numeric(merged["close_ref"], errors="coerce")
+            deviations = (other / base - 1.0).abs()
+            merged = merged.assign(deviation=deviations)
+            over = merged.loc[merged["deviation"] > self.settings.verification_tolerance]
+            for symbol, group in over.groupby("symbol"):
+                worst = group.loc[group["deviation"].idxmax()]
+                offenders.append({
+                    "symbol": str(symbol), "date": _iso(worst["date"]),
+                    "primary_close": float(worst["close"]), "reference_close": float(worst["close_ref"]),
+                    "deviation": round(float(worst["deviation"]), 6),
+                })
+            if offenders:
+                report["warnings"].append(
+                    f"{len(offenders)} sembolde iki kaynağın kapanışı %{self.settings.verification_tolerance*100:.2f} "
+                    "toleransının dışında; Veri Sağlığı'nda listelendi."
+                )
+
+        report.update(
+            available=True,
+            checked_at=started.isoformat(),
+            window={"start": _iso(window_start), "end": _iso(end)},
+            compared_rows=int(len(merged)),
+            compared_symbols=int(merged["symbol"].nunique()) if not merged.empty else 0,
+            max_deviation=round(float(deviations.max()), 6) if not deviations.empty else None,
+            median_deviation=round(float(deviations.median()), 8) if not deviations.empty else None,
+            filled_rows=filled_rows,
+            mismatches=sorted(offenders, key=lambda item: -item["deviation"])[:20],
+            reference_failures=[s.symbol for s in batch.statuses if s.outcome != FetchOutcome.OK],
+        )
+        if report["reference_failures"]:
+            report["warnings"].append(
+                f"{len(report['reference_failures'])} sembol ikincil kaynaktan alınamadı; o semboller doğrulanmadı."
+            )
+        fundamentals = fundamentals if fundamentals is not None and not fundamentals.empty else None
+        return working.loc[:, raw.columns], fundamentals, report
 
     @staticmethod
     def _drop_open_session(raw: pd.DataFrame, now: datetime | None = None) -> tuple[pd.DataFrame, list[str]]:
@@ -415,7 +539,10 @@ class RankingService:
 
     def _criteria(self, as_of: date | None) -> CriteriaResult:
         bundle = self.data.bundle()
-        return compute_criteria(bundle.clean, as_of=as_of, lookback_days=365 * self.settings.lookback_years)
+        return compute_criteria(
+            bundle.clean, as_of=as_of, lookback_days=365 * self.settings.lookback_years,
+            free_float_market_cap=self.data.free_float_market_cap(),
+        )
 
     def run(
         self,
@@ -482,7 +609,7 @@ class RankingService:
             weights=weights,
             data_as_of=_iso(criteria.as_of),
             window_start=_iso(criteria.window_start),
-            normalization=dict(membership.methods),
+            normalization=dict(membership.methods, liquidity_input=criteria.liquidity_method),
             constant_policy=membership.constant_policy,
             model_version=MODEL_VERSION,
             data_source=bundle.source,
@@ -1051,7 +1178,12 @@ def build_container(settings: Settings | None = None, provider: MarketDataProvid
     store: PriceStore = _select_price_store(settings, engine)
     universe_loader = lambda: load_universe(settings.universe_csv)  # noqa: E731
     profiles = load_profiles(settings.profiles_json)
-    data = MarketDataService(settings, universe_loader, provider, store, uow_factory)
+    secondary = None
+    if settings.secondary_provider == "isyatirim":
+        from .data.providers.isyatirim import IsYatirimProvider
+
+        secondary = IsYatirimProvider()
+    data = MarketDataService(settings, universe_loader, provider, store, uow_factory, secondary=secondary)
     ranking = RankingService(data, profiles, uow_factory, settings)
     portfolios = PortfolioService(data, ranking, profiles, uow_factory, settings)
     quotes = QuoteService(data, provider, poll_seconds=settings.quote_poll_seconds,

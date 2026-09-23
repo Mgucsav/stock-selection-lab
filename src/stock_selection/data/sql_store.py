@@ -14,6 +14,7 @@ from sqlalchemy.engine import Engine
 RAW_TABLE = "prices_raw"
 CLEAN_TABLE = "prices_clean"
 BENCHMARK_TABLE = "prices_benchmark"
+FUNDAMENTALS_TABLE = "fundamentals"
 
 
 class SqlPriceStore:
@@ -88,7 +89,13 @@ class SqlPriceStore:
     def load_benchmark(self) -> pd.DataFrame | None:
         return self._load(BENCHMARK_TABLE)
 
+    def save_fundamentals(self, frame: pd.DataFrame) -> None:
+        self._save(FUNDAMENTALS_TABLE, frame)
+
+    def load_fundamentals(self) -> pd.DataFrame | None:
+        return self._load(FUNDAMENTALS_TABLE)
+
     def clear(self) -> None:
         with self.engine.begin() as connection:
-            for table in (RAW_TABLE, CLEAN_TABLE, BENCHMARK_TABLE):
+            for table in (RAW_TABLE, CLEAN_TABLE, BENCHMARK_TABLE, FUNDAMENTALS_TABLE):
                 connection.execute(text(f"DROP TABLE IF EXISTS {table}"))

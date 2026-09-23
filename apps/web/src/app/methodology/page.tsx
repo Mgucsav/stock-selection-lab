@@ -46,7 +46,8 @@ mean_return_i   = mean(r_it)                              (dönemsel; üyelikte 
 annualized      = mean_return_i * 252                     (yalnızca gösterim)
 downside_risk_i = mean( max(0, mean_return_i - r_it) )    (yarı-mutlak sapma; cost)
 dividend_yield  = son 12 ay nakit temettü / referans kapanış
-liquidity_proxy = median( close * volume )                (TL hacim; proxy)`}</Formula>
+liquidity       = median( close * volume ) / fiili dolaşım piyasa değeri   (gerçek devir hızı)
+                  ya da median( close * volume )                          (payda yoksa TL hacim proxy'si)`}</Formula>
           <p className="text-xs text-muted">
             Getiri ve risk için düzeltilmiş kapanış (adj_close) kullanılır; böylece bedelsiz sermaye artırımı gibi kurumsal işlemler yapay getiri
             üretmez. Temettü gözlenmemesi (<span className="num">no_dividend_observed</span>, değer 0) ile sağlayıcının temettü verisi verememesi
@@ -66,11 +67,31 @@ max_division       = x / max_x                            → dividend, liquidit
           </p>
         </Card>
 
-        <Card title="Likidite proxy’si hakkında">
+        <Card title="Likidite: gerçek devir hızı">
           <p className="text-sm text-secondary">
-            Seminerdeki likidite kriteri devir hızı (turnover) ile tanımlanır. Ücretsiz günlük veride dolaşımdaki pay sayısı her hisse için güvenilir
-            biçimde bulunamadığından bu uygulama <strong>TL işlem hacminin medyanını</strong> (kapanış × hacim) kullanır. Bu bir proxy’dir; gerçek
-            devir hızı değildir ve büyük şirketleri küçüklere göre sistematik olarak öne çıkarabilir.
+            Seminerdeki likidite kriteri <strong>devir hızı</strong> ile tanımlanır. Uygulama, İş Yatırım&apos;dan gelen
+            <strong> fiili dolaşımdaki piyasa değeri</strong> (HAO_PD) ile günlük TL işlem hacmini bu paydaya bölerek
+            gerçek devir hızını hesaplar: bir günde el değiştiren serbest dolaşım payı.
+          </p>
+          <Formula>{`devir_hızı = median(kapanış × lot hacmi) / fiili dolaşım piyasa değeri`}</Formula>
+          <p className="text-xs text-muted">
+            Payda tek bir sembolde bile eksikse birim karışmaması için <strong>bütün semboller</strong> eski TL hacim
+            proxy&apos;sine döner ve uyarı üretilir. Hangi yöntemin kullanıldığı her skor çalışmasına
+            (<span className="num">liquidity_input</span>) yazılır.
+          </p>
+        </Card>
+
+        <Card title="Veri doğrulama (iki kaynak)">
+          <p className="text-sm text-secondary">
+            Günlük fiyatlar Yahoo Finance&apos;ten alınır, ardından <strong>İş Yatırım</strong> verisiyle çapraz
+            kontrol edilir: örtüşen her sembol-gün için kapanışlar karşılaştırılır, birincil kaynakta eksik kalan
+            günler İş Yatırım kapanışlarıyla tamamlanır (satır <span className="num">source=&quot;isyatirim&quot;</span>
+            ile işaretlenir).
+          </p>
+          <p className="text-xs text-muted">
+            Sapmalar gizlenmez: tolerans (varsayılan %0,2) üstündeki semboller Veri Sağlığı sayfasında tarih ve iki
+            kaynaktaki fiyatla listelenir. İş Yatırım ucunda açılış fiyatı bulunmadığı için giriş fiyatı (bir sonraki
+            işlem gününün açılışı) her zaman birincil kaynaktan alınır; temettü verisi de yalnızca Yahoo&apos;dan gelir.
           </p>
         </Card>
 
@@ -96,7 +117,7 @@ Değer: V_t = cash + Σ quantity_i · price_it,  getiri_t = V_t / capital − 1`
           <ul className="list-disc space-y-1 pl-5 text-sm text-secondary">
             <li>Veri kaynağı Yahoo Finance (yfinance); günlük ve gecikmelidir, gerçek zamanlı değildir. Demo modunda veri sentetiktir.</li>
             <li>BIST 100 bileşenleri zamanla değişir; evren <span className="num">config/bist100_symbols.csv</span> dosyasından okunur ve geçerlilik tarihi taşır. Evren listesi 19.09.2026 tarihinde KAP (Kamuyu Aydınlatma Platformu) endeks sayfasından doğrulanmıştır; tarihsel bileşen değişimleri (survivorship) modellenmez.</li>
-            <li>Temettü verisi sağlayıcıya bağlıdır; eksik/hatalı olabilir. Devir hızı yerine TL hacim proxy’si kullanılır.</li>
+            <li>Temettü verisi sağlayıcıya bağlıdır; eksik/hatalı olabilir. Devir hızı paydası (fiili dolaşım piyasa değeri) İş Yatırım&apos;dan gelir; alınamazsa TL hacim proxy&apos;sine dönülür.</li>
             <li>Komisyon, vergi, kayma (slippage) ve emir derinliği modellenmez. Değerleme kapanış fiyatıyla yapılır; fiyatı olmayan günlerde son kapanış ileri taşınır ve uyarı verilir.</li>
             <li>Tarihsel volatilite ve maksimum düşüş geçmiş gözlemdir; gelecek performansın göstergesi değildir. Hiçbir çıktı garanti getiri veya fiyat tahmini değildir.</li>
             <li>Uygulama gerçek emir göndermez ve aracı kurum hesabına bağlanmaz.</li>

@@ -6,19 +6,26 @@ Formüller (``r_it`` günlük basit getiri):
 mean_return_i   = mean(r_it)                                  (dönemsel)
 downside_risk_i = mean(max(0, mean_return_i - r_it))          (yarı-mutlak sapma, maliyet)
 dividend_yield  = annual_cash_dividend / reference_price
-liquidity_proxy = median(close * volume)                      (TL işlem hacmi proxy'si)
+liquidity       = median(close * volume) / fiili_dolasim_piyasa_degeri   (gercek devir hizi)
+                  ya da median(close * volume)                          (TL hacim proxy'si)
 ```
 
-Getiriler ``adj_close`` üzerinden hesaplanır; böylece bedelsiz/bedelli
-sermaye artırımı ve temettü kesintileri yapay getiri üretmez. Likidite
-proxy'si gerçek devir hızı (turnover) değildir; ücretsiz veriyle dolaşımdaki
-pay sayısı güvenilir biçimde bulunamadığı için TL hacim medyanı kullanılır.
+Getiriler ``adj_close`` uzerinden hesaplanir; boylece bedelsiz/bedelli
+sermaye artirimi ve temettu kesintileri yapay getiri uretmez.
+
+Likidite, seminerdeki **devir hizi** tanimina uygun olarak, fiili dolasimdaki
+piyasa degeri (Is Yatirim ``HAO_PD``) elde varsa gunluk TL hacmin buna
+bolunmesiyle hesaplanir. Payda her sembol icin mevcut degilse birim karismasin
+diye **butun semboller** TL hacim proxy'sine doner ve uyari uretilir. Hangi
+yontemin kullanildigi ``CriteriaResult.liquidity_method`` ile tasinir ve her
+skor calismasina yazilir.
 
 Günlük getiriler ``src.day01_baseline.simple_returns`` ile üretilir.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -49,7 +56,7 @@ def downside_risk(returns: pd.Series) -> float:
 
 
 def liquidity_proxy(close: pd.Series, volume: pd.Series) -> float:
-    """TL hacim medyanı; gerçek turnover değildir."""
+    """Günlük TL işlem hacminin medyanı (devir hızı paydası uygulanmadan)."""
     tl_volume = pd.to_numeric(close, errors="coerce") * pd.to_numeric(volume, errors="coerce")
     tl_volume = tl_volume.dropna()
     if tl_volume.empty:
@@ -67,6 +74,8 @@ class CriteriaResult:
     as_of: date | None = None
     window_start: date | None = None
     observations: int = 0
+    # "turnover_free_float" (gerçek devir hızı) veya "tl_volume_proxy"
+    liquidity_method: str = "tl_volume_proxy"
 
 
 def compute_criteria(
@@ -75,6 +84,7 @@ def compute_criteria(
     lookback_days: int | None = None,
     dividend_window_days: int = 365,
     min_observations: int = MIN_OBSERVATIONS,
+    free_float_market_cap: Mapping[str, float] | None = None,
 ) -> CriteriaResult:
     """Temiz uzun tablodan sembol bazında kriterleri hesaplar.
 
@@ -127,7 +137,7 @@ def compute_criteria(
         rows[str(symbol)] = {
             "return": mu,
             "dividend": dividend_yield,
-            "liquidity": liquidity,
+            "liquidity": liquidity,  # devir hızı seçilirse aşağıda paydaya bölünür
             "risk": risk,
             "annualized_return": mu * TRADING_DAYS,
             "dividend_status": dividend_status,
@@ -136,6 +146,21 @@ def compute_criteria(
         }
 
     table = pd.DataFrame.from_dict(rows, orient="index")
+
+    # --- Likidite: mümkünse gerçek devir hızı (TL hacim / fiili dolaşım piyasa değeri)
+    liquidity_method = "tl_volume_proxy"
+    if not table.empty and free_float_market_cap:
+        covered = {s: float(free_float_market_cap[s]) for s in table.index
+                   if s in free_float_market_cap and float(free_float_market_cap[s]) > 0}
+        if len(covered) == len(table.index):
+            table["liquidity"] = [table.loc[s, "liquidity"] / covered[s] for s in table.index]
+            liquidity_method = "turnover_free_float"
+        else:
+            # Karışık birim olmaz: tek bir sembol bile eksikse herkes için proxy kullanılır
+            warnings.append(
+                f"{len(table.index) - len(covered)} sembolde fiili dolaşım piyasa değeri yok; "
+                "likidite gerçek devir hızı yerine TL hacim proxy'si ile hesaplandı."
+            )
     if table.empty:
         warnings.append("Hiçbir sembol yeterli gözleme sahip değil.")
         table = pd.DataFrame(columns=CRITERIA_ORDER)
@@ -154,4 +179,5 @@ def compute_criteria(
         as_of=effective_as_of.date(),
         window_start=window_start.date(),
         observations=int(table["observations"].max()) if not table.empty else 0,
+        liquidity_method=liquidity_method,
     )

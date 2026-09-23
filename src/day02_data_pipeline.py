@@ -22,7 +22,7 @@ REQUIRED_COLUMNS = [
     "ingested_at",
 ]
 PRICE_COLUMNS = ["open", "high", "low", "close", "adj_close"]
-ALLOWED_SOURCES = {"demo", "csv", "vendor_a", "yahoo", "fake"}
+ALLOWED_SOURCES = {"demo", "csv", "vendor_a", "yahoo", "fake", "isyatirim"}
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 DEFAULT_REJECTED_DIR = PROJECT_ROOT / "data" / "rejected"

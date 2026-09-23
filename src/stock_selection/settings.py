@@ -82,6 +82,14 @@ class Settings:
     database_url: str = field(default_factory=_default_database_url)
     # parquet (yerel dosya) | sql (veritabanı tabloları; bulut için) | auto (PostgreSQL ise sql, değilse parquet)
     price_store: str = field(default_factory=lambda: os.environ.get("SSL_PRICE_STORE", "auto"))
+    # Doğrulama/tamamlama sağlayıcısı: isyatirim | none
+    secondary_provider: str = field(default_factory=lambda: os.environ.get("SSL_SECONDARY_PROVIDER", "isyatirim"))
+    # İkincil kaynakla karşılaştırılacak/tamamlanacak son gün sayısı
+    verification_days: int = field(default_factory=lambda: _env_int("SSL_VERIFICATION_DAYS", 15))
+    # Kapanış farkı bu oranı aşarsa uyarı üretilir (0.002 = %0,2)
+    verification_tolerance: float = field(
+        default_factory=lambda: float(os.environ.get("SSL_VERIFICATION_TOLERANCE", "0.002"))
+    )
     provider_name: str = field(
         default_factory=lambda: os.environ.get("SSL_DATA_PROVIDER", "yahoo")
     )

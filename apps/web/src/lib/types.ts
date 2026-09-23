@@ -71,6 +71,22 @@ export interface DataStatus {
   date_range: { start: string | null; end: string | null } | null;
   quality_report: Record<string, unknown>;
   warnings: string[];
+  verification?: {
+    available: boolean;
+    provider: string | null;
+    message?: string;
+    checked_at?: string;
+    window?: { start: string | null; end: string | null };
+    compared_rows?: number;
+    compared_symbols?: number;
+    max_deviation?: number | null;
+    median_deviation?: number | null;
+    filled_rows?: number;
+    tolerance?: number;
+    mismatches?: Array<{ symbol: string; date: string; primary_close: number; reference_close: number; deviation: number }>;
+    reference_failures?: string[];
+    warnings?: string[];
+  } | null;
   auto_refresh?: {
     enabled: boolean;
     running: boolean;

@@ -67,6 +67,7 @@ class DataStatusResponse(BaseModel):
     quality_report: dict[str, Any] = {}
     warnings: list[str] = []
     auto_refresh: dict[str, Any] | None = None
+    verification: dict[str, Any] | None = None
 
 
 class ProfileOut(BaseModel):

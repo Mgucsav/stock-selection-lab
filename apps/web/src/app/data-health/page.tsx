@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 import { Badge, Card, DemoBanner, ErrorBox, KeyValue, Loading, PageHeader, StatTile, WarningList } from "@/components/ui";
 import { api, describeError } from "@/lib/api";
-import { formatDate, formatDateTime, formatPct } from "@/lib/format";
+import { formatDate, formatDateTime, formatNumber, formatPct } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 
 export default function DataHealthPage() {
@@ -72,7 +72,7 @@ export default function DataHealthPage() {
             <StatTile label="Veri aralığı" value={<span className="text-base">{formatDate(s.date_range?.start)} – {formatDate(s.date_range?.end)}</span>} hint={s.data_label} />
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-3">
             <Card title="Sağlayıcı ve durum">
               <KeyValue
                 items={[
@@ -96,6 +96,45 @@ export default function DataHealthPage() {
                 </div>
               )}
             </Card>
+            <Card title="İkinci kaynakla doğrulama" subtitle="İş Yatırım kapanışlarıyla çapraz kontrol ve eksik gün tamamlama">
+              {!s.verification?.available ? (
+                <p className="text-xs text-muted">{s.verification?.message ?? "Son yenilemede doğrulama yapılmadı."}</p>
+              ) : (
+                <>
+                  <KeyValue
+                    items={[
+                      ["Kaynak", s.verification.provider ?? "—"],
+                      ["Pencere", `${formatDate(s.verification.window?.start)} – ${formatDate(s.verification.window?.end)}`],
+                      ["Karşılaştırılan", `${s.verification.compared_rows ?? 0} satır · ${s.verification.compared_symbols ?? 0} sembol`],
+                      ["Maks. kapanış sapması", formatPct(s.verification.max_deviation ?? null, 4)],
+                      ["Medyan sapma", formatPct(s.verification.median_deviation ?? null, 6)],
+                      ["Tolerans", formatPct(s.verification.tolerance ?? null, 2)],
+                      ["Eksikten tamamlanan", `${s.verification.filled_rows ?? 0} sembol-gün`],
+                      ["İkincil kaynakta alınamayan", `${s.verification.reference_failures?.length ?? 0} sembol`],
+                    ]}
+                  />
+                  {(s.verification.mismatches?.length ?? 0) > 0 && (
+                    <table className="table-dense mt-2 w-full text-xs">
+                      <thead>
+                        <tr><th>Sembol</th><th>Tarih</th><th className="text-right">Birincil</th><th className="text-right">İş Yatırım</th><th className="text-right">Sapma</th></tr>
+                      </thead>
+                      <tbody>
+                        {s.verification.mismatches!.map((m) => (
+                          <tr key={`${m.symbol}-${m.date}`}>
+                            <td className="num">{m.symbol.replace(".IS", "")}</td>
+                            <td className="num">{formatDate(m.date)}</td>
+                            <td className="num text-right">{formatNumber(m.primary_close, 2)}</td>
+                            <td className="num text-right">{formatNumber(m.reference_close, 2)}</td>
+                            <td className="num text-right text-warning">{formatPct(m.deviation, 3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
+            </Card>
+
             <Card title="Kalite uyarıları">
               <WarningList warnings={[...s.warnings, ...(universe.data?.warnings ?? [])]} title="Evren ve veri uyarıları" />
               {s.warnings.length === 0 && (universe.data?.warnings.length ?? 0) === 0 && <p className="text-xs text-muted">Uyarı yok.</p>}

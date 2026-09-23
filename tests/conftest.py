@@ -61,6 +61,7 @@ def test_settings(tmp_path: Path, session_demo_dir: Path) -> Settings:
         price_store="sql",  # pyarrow'a bağımlı olmadan (SQLite tabloları)
         cors_origins=("http://localhost:3000",),
         quote_poll_seconds=0,  # testlerde arka plan fiyat yenileme kapalı
+        secondary_provider="none",  # testlerde ikincil kaynak (ağ) kapalı
     )
 
 

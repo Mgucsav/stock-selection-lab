@@ -20,6 +20,8 @@ class PriceStore(Protocol):
     def load_clean(self) -> pd.DataFrame | None: ...
     def save_benchmark(self, frame: pd.DataFrame) -> None: ...
     def load_benchmark(self) -> pd.DataFrame | None: ...
+    def save_fundamentals(self, frame: pd.DataFrame) -> None: ...
+    def load_fundamentals(self) -> pd.DataFrame | None: ...
     def clear(self) -> None: ...
 
 
@@ -27,6 +29,7 @@ class ParquetPriceCache:
     RAW_FILE = "prices_raw.parquet"
     CLEAN_FILE = "prices_clean.parquet"
     BENCHMARK_FILE = "benchmark.parquet"
+    FUNDAMENTALS_FILE = "fundamentals.parquet"
 
     def __init__(self, directory: str | Path) -> None:
         self.directory = Path(directory)
@@ -67,8 +70,14 @@ class ParquetPriceCache:
     def load_benchmark(self) -> pd.DataFrame | None:
         return self._load(self.BENCHMARK_FILE)
 
+    def save_fundamentals(self, frame: pd.DataFrame) -> None:
+        self._save(self.FUNDAMENTALS_FILE, frame)
+
+    def load_fundamentals(self) -> pd.DataFrame | None:
+        return self._load(self.FUNDAMENTALS_FILE)
+
     def clear(self) -> None:
-        for name in (self.RAW_FILE, self.CLEAN_FILE, self.BENCHMARK_FILE):
+        for name in (self.RAW_FILE, self.CLEAN_FILE, self.BENCHMARK_FILE, self.FUNDAMENTALS_FILE):
             path = self._path(name)
             if path.exists():
                 path.unlink()

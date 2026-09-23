@@ -54,6 +54,7 @@ src/
     application.py        servisler: MarketDataService, RankingService, PortfolioService
     data/
       providers/base.py   MarketDataProvider protokolü, FetchOutcome (ok / no_data / provider_error)
+      providers/isyatirim.py  İş Yatırım doğrulama/tamamlama kaynağı + fiili dolaşım piyasa değeri
       providers/yahoo.py  YahooFinanceProvider: batch, retry + üstel geri çekilme, actions=True
       providers/fake.py   ağ kullanmayan test/demo sağlayıcısı
       cleaning.py         day02.clean_prices + temettü bağlama + stale/eksik gün kontrolü
@@ -97,7 +98,8 @@ r_it            = adj_close_t / adj_close_{t-1} - 1
 mean_return_i   = mean(r_it)                              (dönemsel; üyelikte kullanılır)
 downside_risk_i = mean(max(0, mean_return_i - r_it))      (yarı-mutlak sapma, cost)
 dividend_yield  = son 12 ay nakit temettü / referans kapanış
-liquidity_proxy = median(close * volume)                  (TL hacim; gerçek turnover değil)
+liquidity       = median(close * volume) / fiili dolaşım piyasa değeri   (gerçek devir hızı)
+                  ya da median(close * volume)                          (payda yoksa TL hacim proxy'si)
 
 benefit_membership = (x - min_x) / (max_x - min_x)        → return
 cost_membership    = 1 - (x - min_x) / (max_x - min_x)    → risk
@@ -191,6 +193,22 @@ POST /api/v1/portfolios/{portfolio_id}/revalue
 `rankings/run` gövdesinde `weights` verilirse özel ağırlıklar kullanılır;
 `persist=false` ile önizleme (kayıtsız) alınır. Hatalar `{"detail": "..."}`
 biçiminde Türkçe döner (400 doğrulama, 404 bulunamadı, 503 veri alınamadı).
+
+## Veri doğruluğu: iki kaynak
+
+Günlük fiyatlar Yahoo Finance'ten gelir; her yenilemede **İş Yatırım** (`isyatirim.com.tr` halka açık veri ucu)
+ile çapraz kontrol edilir:
+
+- **Karşılaştırma:** son `SSL_VERIFICATION_DAYS` (varsayılan 15) gün için örtüşen sembol-günlerde kapanışlar
+  karşılaştırılır; `SSL_VERIFICATION_TOLERANCE` (varsayılan %0,2) üstündeki sapmalar Veri Sağlığı'nda listelenir.
+  Son ölçümde 100 sembol × 7 gün karşılaştırıldı, **maksimum sapma 0,0** çıktı.
+- **Tamamlama:** birincil kaynakta eksik kalan günler İş Yatırım kapanışlarıyla doldurulur
+  (satır `source="isyatirim"`); saatlik barlardan türetmeye göre daha doğrudur.
+- **Devir hızı:** aynı çekimde gelen **fiili dolaşım piyasa değeri** (`HAO_PD`) `fundamentals` tablosuna yazılır,
+  likidite kriteri gerçek devir hızına döner (`liquidity_input=turnover_free_float`).
+- **Sınırlar:** İş Yatırım ucunda **açılış fiyatı ve temettü yoktur**; giriş fiyatları ve temettü verimi birincil
+  kaynaktan gelir. Uç resmî bir API değildir, bu yüzden birincil değil doğrulama kaynağıdır
+  (`SSL_SECONDARY_PROVIDER=none` ile kapatılır; o durumda eksik günler saatlik barlardan türetilir).
 
 ## BIST 100 evreni
 
