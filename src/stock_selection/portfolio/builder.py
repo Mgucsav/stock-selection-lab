@@ -110,8 +110,13 @@ def build_candidate(
     name_map: Mapping[str, str] | None = None,
     as_of=None,
     lookback_days: int | None = None,
+    with_stats: bool = True,
 ) -> PortfolioCandidate:
-    """Profil sıralamasındaki ilk N uygun hisseden model portföy üretir."""
+    """Profil sıralamasındaki ilk N uygun hisseden model portföy üretir.
+
+    ``with_stats=False`` tarihsel volatilite/düşüş hesabını atlar; yürüyen backtest
+    her karar tarihinde yalnızca ağırlıklara ihtiyaç duyar.
+    """
     warnings: list[str] = []
     ranked = scores.sort_values(["rank", "cce10"], ascending=[True, False])
     eligible = [s for s in ranked.index if s in criteria.index and s in adj_close_wide.columns]
@@ -154,7 +159,10 @@ def build_candidate(
             exposure[key] = exposure.get(key, 0.0) + weights[s]
         sector_exposure = {k: round(v, 6) for k, v in sorted(exposure.items(), key=lambda kv: -kv[1])}
 
-    stats = historical_stats(adj_close_wide, weights, as_of=as_of, lookback_days=lookback_days)
+    stats = (
+        historical_stats(adj_close_wide, weights, as_of=as_of, lookback_days=lookback_days)
+        if with_stats else {}
+    )
     return PortfolioCandidate(
         profile_id=profile.id,
         profile_label=profile.label,
