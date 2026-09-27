@@ -25,7 +25,7 @@ from .data.providers.base import INTRADAY_LIMITS, FetchOutcome, MarketDataProvid
 from .data.providers.fake import FakeProvider
 from .data.providers.yahoo import YahooFinanceProvider
 from .demo import DEMO_SOURCE, generate_demo_prices
-from .features.criteria import CriteriaResult, compute_criteria
+from .features.criteria import CriteriaResult
 from .fuzzy.fpfs import CRITERIA_COLUMNS, evaluate_fpfs
 from .fuzzy.membership import ConstantColumnPolicy, build_memberships
 from .fuzzy.profiles import InvestorProfile, load_profiles, validate_weights
@@ -89,6 +89,17 @@ class DataBundle:
     benchmark: pd.DataFrame | None
     source: str
     status: dict[str, Any]
+    # Türetilmiş, pahalı nesneler: veri seti değişene kadar yeniden hesaplanmaz
+    _panel: Any = None
+    _free_float: dict[str, float] | None = None
+
+    def panel(self):
+        """Kriter paneli (sembol serileri NumPy'a açılmış); ilk çağrıda kurulur."""
+        if self._panel is None:
+            from .features.panel import CriteriaPanel
+
+            self._panel = CriteriaPanel(self.clean)
+        return self._panel
 
 
 class MarketDataService:
@@ -148,7 +159,18 @@ class MarketDataService:
             uow.commit()
 
     def free_float_market_cap(self) -> dict[str, float]:
-        """Sembol başına son fiili dolaşım piyasa değeri (gerçek devir hızı paydası)."""
+        """Sembol başına son fiili dolaşım piyasa değeri (gerçek devir hızı paydası).
+
+        Sonuç veri paketiyle birlikte önbelleklenir; her sıralama isteğinde
+        veritabanına gidilmez (uzak PostgreSQL'de bu tur pahalıdır).
+        """
+        bundle = self.bundle()
+        if bundle._free_float is not None:
+            return bundle._free_float
+        bundle._free_float = self._load_free_float()
+        return bundle._free_float
+
+    def _load_free_float(self) -> dict[str, float]:
         try:
             frame = self.store.load_fundamentals()
         except Exception as error:  # depo desteklemiyorsa sessizce proxy'ye düş
@@ -538,9 +560,10 @@ class RankingService:
         self.settings = settings
 
     def _criteria(self, as_of: date | None) -> CriteriaResult:
+        """Kriterler hızlı panelden üretilir; çıktı ``compute_criteria`` ile birebir aynıdır."""
         bundle = self.data.bundle()
-        return compute_criteria(
-            bundle.clean, as_of=as_of, lookback_days=365 * self.settings.lookback_years,
+        return bundle.panel().criteria_at(
+            as_of, lookback_days=365 * self.settings.lookback_years,
             free_float_market_cap=self.data.free_float_market_cap(),
         )
 
